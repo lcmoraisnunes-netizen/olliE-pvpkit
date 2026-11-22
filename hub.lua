@@ -1,17 +1,17 @@
 --[[
-    olliE PvP Kit Hub — 1.8 KIT PVP / Bloxine Extra
-    Place \~72393956865647
-    Fixed: floating open/close button + RightCtrl keybind
+    olliE PvP Kit Hub — Delta-safe rebuild
+    Forces PlayerGui, bigger floating button, debug prints
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
-local CoreGui = game:GetService("CoreGui")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
+
+print("[olliE] script started")
 
 local Config = {
     ESP = {
@@ -73,7 +73,18 @@ local Connections = {}
 local DrawingObjects = {}
 local UIVisible = true
 local MainFrame = nil
-local ScreenGuiRef = nil
+local FloatBtn = nil
+local HasDrawing = false
+
+pcall(function()
+    local test = Drawing.new("Circle")
+    test:Remove()
+    HasDrawing = true
+    print("[olliE] Drawing library OK")
+end)
+if not HasDrawing then
+    print("[olliE] WARNING: Drawing library missing — ESP will be limited")
+end
 
 local function IsAlive(plr)
     local char = plr.Character
@@ -109,12 +120,19 @@ local function GetDistance(pos)
 end
 
 local function CreateDrawing(class, props)
-    local obj = Drawing.new(class)
-    for k, v in pairs(props or {}) do
-        obj[k] = v
+    if not HasDrawing then return nil end
+    local ok, obj = pcall(function()
+        local o = Drawing.new(class)
+        for k, v in pairs(props or {}) do
+            o[k] = v
+        end
+        return o
+    end)
+    if ok and obj then
+        table.insert(DrawingObjects, obj)
+        return obj
     end
-    table.insert(DrawingObjects, obj)
-    return obj
+    return nil
 end
 
 local function ClearPlayerESP(plr)
@@ -152,6 +170,7 @@ local function SetupPlayerESP(plr)
 end
 
 local function UpdateSkeleton(data, char)
+    if not data.Skeleton then return end
     local joints = {
         {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
         {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
@@ -188,13 +207,20 @@ local function UpdateSkeleton(data, char)
     end
 end
 
+local function SafeSetVisible(obj, vis)
+    if obj then pcall(function() obj.Visible = vis end) end
+end
+
 local function UpdateESP()
+    if not HasDrawing then return end
     for plr, data in pairs(ESPObjects) do
         if not IsAlive(plr) or not IsEnemy(plr) then
             for _, obj in pairs(data) do
                 if typeof(obj) == "table" then
-                    for _, o in pairs(obj) do if o then o.Visible = false end end
-                elseif obj then obj.Visible = false end
+                    for _, o in pairs(obj) do SafeSetVisible(o, false) end
+                else
+                    SafeSetVisible(obj, false)
+                end
             end
             continue
         end
@@ -205,8 +231,10 @@ local function UpdateESP()
         if not root or not hum then
             for _, obj in pairs(data) do
                 if typeof(obj) == "table" then
-                    for _, o in pairs(obj) do if o then o.Visible = false end end
-                elseif obj then obj.Visible = false end
+                    for _, o in pairs(obj) do SafeSetVisible(o, false) end
+                else
+                    SafeSetVisible(obj, false)
+                end
             end
             continue
         end
@@ -214,8 +242,10 @@ local function UpdateESP()
         if dist > Config.ESP.MaxDistance then
             for _, obj in pairs(data) do
                 if typeof(obj) == "table" then
-                    for _, o in pairs(obj) do if o then o.Visible = false end end
-                elseif obj then obj.Visible = false end
+                    for _, o in pairs(obj) do SafeSetVisible(o, false) end
+                else
+                    SafeSetVisible(obj, false)
+                end
             end
             continue
         end
@@ -223,8 +253,10 @@ local function UpdateESP()
         if not onScreen or depth < 0 then
             for _, obj in pairs(data) do
                 if typeof(obj) == "table" then
-                    for _, o in pairs(obj) do if o then o.Visible = false end end
-                elseif obj then obj.Visible = false end
+                    for _, o in pairs(obj) do SafeSetVisible(o, false) end
+                else
+                    SafeSetVisible(obj, false)
+                end
             end
             continue
         end
@@ -235,82 +267,83 @@ local function UpdateESP()
         local height = math.abs(headScreen.Y - footScreen.Y)
         local width = height * 0.55
 
-        if Config.ESP.Box and Config.ESP.Enabled then
-            data.BoxOutline.Size = Vector2.new(width + 2, height + 2)
-            data.BoxOutline.Position = Vector2.new(pos.X - (width + 2)/2, pos.Y - height/2 - 1)
-            data.BoxOutline.Visible = true
+        if Config.ESP.Box and Config.ESP.Enabled and data.Box then
+            if data.BoxOutline then
+                data.BoxOutline.Size = Vector2.new(width + 2, height + 2)
+                data.BoxOutline.Position = Vector2.new(pos.X - (width + 2)/2, pos.Y - height/2 - 1)
+                data.BoxOutline.Visible = true
+            end
             data.Box.Size = Vector2.new(width, height)
             data.Box.Position = Vector2.new(pos.X - width/2, pos.Y - height/2)
             data.Box.Color = Config.ESP.BoxColor
             data.Box.Visible = true
         else
-            data.Box.Visible = false
-            data.BoxOutline.Visible = false
+            SafeSetVisible(data.Box, false)
+            SafeSetVisible(data.BoxOutline, false)
         end
 
-        if Config.ESP.HitboxESP and Config.ESP.Enabled then
+        if Config.ESP.HitboxESP and Config.ESP.Enabled and data.Hitbox then
             local hbSize = Config.Hitbox.Enabled and Config.Hitbox.Size or 2
-            local hbScreen, hbOn = WorldToScreen(root.Position)
-            if hbOn then
-                local scale = (height / 6) * (hbSize / 2)
-                data.Hitbox.Size = Vector2.new(scale, scale)
-                data.Hitbox.Position = Vector2.new(hbScreen.X - scale/2, hbScreen.Y - scale/2)
-                data.Hitbox.Color = Config.ESP.HitboxColor
-                data.Hitbox.Visible = true
-            else
-                data.Hitbox.Visible = false
-            end
+            local scale = (height / 6) * (hbSize / 2)
+            data.Hitbox.Size = Vector2.new(scale, scale)
+            data.Hitbox.Position = Vector2.new(pos.X - scale/2, pos.Y - scale/2)
+            data.Hitbox.Color = Config.ESP.HitboxColor
+            data.Hitbox.Visible = true
         else
-            data.Hitbox.Visible = false
+            SafeSetVisible(data.Hitbox, false)
         end
 
-        if Config.ESP.Name and Config.ESP.Enabled then
+        if Config.ESP.Name and Config.ESP.Enabled and data.Name then
             data.Name.Text = plr.Name
             data.Name.Position = Vector2.new(pos.X, pos.Y - height/2 - 16)
             data.Name.Color = Config.ESP.NameColor
             data.Name.Visible = true
         else
-            data.Name.Visible = false
+            SafeSetVisible(data.Name, false)
         end
 
-        if Config.ESP.Distance and Config.ESP.Enabled then
+        if Config.ESP.Distance and Config.ESP.Enabled and data.Distance then
             data.Distance.Text = string.format("[%dm]", math.floor(dist))
             data.Distance.Position = Vector2.new(pos.X, pos.Y + height/2 + 2)
             data.Distance.Color = Config.ESP.NameColor
             data.Distance.Visible = true
         else
-            data.Distance.Visible = false
+            SafeSetVisible(data.Distance, false)
         end
 
-        if Config.ESP.Health and Config.ESP.Enabled then
+        if Config.ESP.Health and Config.ESP.Enabled and data.HealthBar then
             local hp = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
             local barH = height
             local barW = 3
-            data.HealthOutline.Size = Vector2.new(barW + 2, barH + 2)
-            data.HealthOutline.Position = Vector2.new(pos.X - width/2 - 8, pos.Y - height/2 - 1)
-            data.HealthOutline.Visible = true
+            if data.HealthOutline then
+                data.HealthOutline.Size = Vector2.new(barW + 2, barH + 2)
+                data.HealthOutline.Position = Vector2.new(pos.X - width/2 - 8, pos.Y - height/2 - 1)
+                data.HealthOutline.Visible = true
+            end
             data.HealthBar.Size = Vector2.new(barW, barH * hp)
             data.HealthBar.Position = Vector2.new(pos.X - width/2 - 7, pos.Y - height/2 + (barH * (1 - hp)))
             data.HealthBar.Color = Color3.fromRGB(255 * (1 - hp), 255 * hp, 0)
             data.HealthBar.Visible = true
         else
-            data.HealthBar.Visible = false
-            data.HealthOutline.Visible = false
+            SafeSetVisible(data.HealthBar, false)
+            SafeSetVisible(data.HealthOutline, false)
         end
 
-        if Config.ESP.Snaplines and Config.ESP.Enabled then
+        if Config.ESP.Snaplines and Config.ESP.Enabled and data.Snapline then
             data.Snapline.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
             data.Snapline.To = Vector2.new(pos.X, pos.Y + height/2)
             data.Snapline.Color = Config.ESP.SnaplineColor
             data.Snapline.Visible = true
         else
-            data.Snapline.Visible = false
+            SafeSetVisible(data.Snapline, false)
         end
 
         if Config.ESP.Skeleton and Config.ESP.Enabled then
             UpdateSkeleton(data, char)
         else
-            for _, line in pairs(data.Skeleton) do line.Visible = false end
+            if data.Skeleton then
+                for _, line in pairs(data.Skeleton) do SafeSetVisible(line, false) end
+            end
         end
     end
 end
@@ -344,10 +377,12 @@ local function GetClosestInFOV()
 end
 
 local function UpdateAimbot()
-    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    FOVCircle.Radius = Config.Aimbot.FOV
-    FOVCircle.Color = CurrentTarget and Config.Aimbot.LockedColor or Config.Aimbot.FOVColor
-    FOVCircle.Visible = Config.Aimbot.ShowFOV and Config.Aimbot.Enabled
+    if FOVCircle then
+        FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        FOVCircle.Radius = Config.Aimbot.FOV
+        FOVCircle.Color = CurrentTarget and Config.Aimbot.LockedColor or Config.Aimbot.FOVColor
+        FOVCircle.Visible = Config.Aimbot.ShowFOV and Config.Aimbot.Enabled
+    end
 
     if not Config.Aimbot.Enabled or not Aiming then
         if not Config.Aimbot.Sticky then CurrentTarget = nil end
@@ -444,31 +479,33 @@ end
 
 local function InitAntiBan()
     if not Config.AntiBan.Enabled then return end
-    if Config.AntiBan.HookNamecall then
-        local mt = getrawmetatable(game)
-        local oldNamecall = mt.__namecall
-        setreadonly(mt, false)
-        mt.__namecall = newcclosure(function(self, ...)
-            local method = getnamecallmethod()
-            if method == "Kick" or method == "kick" then return nil end
-            if method == "FireServer" or method == "InvokeServer" then
-                local remoteName = tostring(self)
-                if string.find(string.lower(remoteName), "kick")
-                    or string.find(string.lower(remoteName), "ban")
-                    or string.find(string.lower(remoteName), "detect")
-                    or string.find(string.lower(remoteName), "anticheat") then
-                    return nil
+    pcall(function()
+        if Config.AntiBan.HookNamecall then
+            local mt = getrawmetatable(game)
+            local oldNamecall = mt.__namecall
+            setreadonly(mt, false)
+            mt.__namecall = newcclosure(function(self, ...)
+                local method = getnamecallmethod()
+                if method == "Kick" or method == "kick" then return nil end
+                if method == "FireServer" or method == "InvokeServer" then
+                    local remoteName = tostring(self)
+                    if string.find(string.lower(remoteName), "kick")
+                        or string.find(string.lower(remoteName), "ban")
+                        or string.find(string.lower(remoteName), "detect")
+                        or string.find(string.lower(remoteName), "anticheat") then
+                        return nil
+                    end
                 end
-            end
-            return oldNamecall(self, ...)
-        end)
-        setreadonly(mt, true)
-    end
-    if Config.AntiBan.HookKick then
-        pcall(function()
+                return oldNamecall(self, ...)
+            end)
+            setreadonly(mt, true)
+        end
+    end)
+    pcall(function()
+        if Config.AntiBan.HookKick then
             hookfunction(LocalPlayer.Kick, newcclosure(function() return nil end))
-        end)
-    end
+        end
+    end)
 end
 
 local function ToggleUI()
@@ -476,39 +513,54 @@ local function ToggleUI()
     if MainFrame then
         MainFrame.Visible = UIVisible
     end
+    print("[olliE] UI toggled →", UIVisible)
 end
 
 local function CreateGUI()
+    local pg = LocalPlayer:WaitForChild("PlayerGui", 10)
+    if not pg then
+        print("[olliE] ERROR: PlayerGui not found")
+        return
+    end
+
+    for _, g in ipairs(pg:GetChildren()) do
+        if g.Name == "olliE_PvPKitHub" then
+            g:Destroy()
+        end
+    end
+
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "olliE_PvPKitHub"
     ScreenGui.ResetOnSpawn = false
+    ScreenGui.IgnoreGuiInset = true
+    ScreenGui.DisplayOrder = 999
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    pcall(function() ScreenGui.Parent = CoreGui end)
-    if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-    ScreenGuiRef = ScreenGui
+    ScreenGui.Parent = pg
+    print("[olliE] ScreenGui parented to PlayerGui")
 
-    -- Floating open/close button (always visible)
-    local FloatBtn = Instance.new("TextButton")
+    FloatBtn = Instance.new("TextButton")
     FloatBtn.Name = "FloatToggle"
-    FloatBtn.Size = UDim2.new(0, 48, 0, 48)
-    FloatBtn.Position = UDim2.new(0, 20, 0.5, -24)
-    FloatBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+    FloatBtn.Size = UDim2.new(0, 70, 0, 70)
+    FloatBtn.Position = UDim2.new(0, 15, 0.4, 0)
+    FloatBtn.BackgroundColor3 = Color3.fromRGB(255, 40, 40)
     FloatBtn.Text = "oE"
     FloatBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    FloatBtn.TextSize = 16
+    FloatBtn.TextSize = 22
     FloatBtn.Font = Enum.Font.GothamBold
     FloatBtn.BorderSizePixel = 0
-    FloatBtn.ZIndex = 50
+    FloatBtn.ZIndex = 100
+    FloatBtn.AutoButtonColor = true
     FloatBtn.Parent = ScreenGui
+
     local FloatCorner = Instance.new("UICorner")
     FloatCorner.CornerRadius = UDim.new(1, 0)
     FloatCorner.Parent = FloatBtn
+
     local FloatStroke = Instance.new("UIStroke")
     FloatStroke.Color = Color3.fromRGB(255, 255, 255)
-    FloatStroke.Thickness = 1.5
+    FloatStroke.Thickness = 3
     FloatStroke.Parent = FloatBtn
 
-    -- make floating button draggable
     local draggingFloat, dragStart, startPos
     FloatBtn.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -535,82 +587,80 @@ local function CreateGUI()
 
     local Main = Instance.new("Frame")
     Main.Name = "Main"
-    Main.Size = UDim2.new(0, 320, 0, 420)
-    Main.Position = UDim2.new(0.5, -160, 0.5, -210)
+    Main.Size = UDim2.new(0, 300, 0, 400)
+    Main.Position = UDim2.new(0.5, -150, 0.5, -200)
     Main.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
     Main.BorderSizePixel = 0
     Main.Active = true
     Main.Draggable = true
     Main.Visible = true
+    Main.ZIndex = 10
     Main.Parent = ScreenGui
     MainFrame = Main
+
     local UICorner = Instance.new("UICorner")
-    UICorner.CornerRadius = UDim.new(0, 8)
+    UICorner.CornerRadius = UDim.new(0, 10)
     UICorner.Parent = Main
 
     local TitleBar = Instance.new("Frame")
-    TitleBar.Size = UDim2.new(1, 0, 0, 36)
+    TitleBar.Size = UDim2.new(1, 0, 0, 40)
     TitleBar.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
     TitleBar.BorderSizePixel = 0
     TitleBar.Parent = Main
     local TitleCorner = Instance.new("UICorner")
-    TitleCorner.CornerRadius = UDim.new(0, 8)
+    TitleCorner.CornerRadius = UDim.new(0, 10)
     TitleCorner.Parent = TitleBar
 
     local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(1, -80, 1, 0)
+    Title.Size = UDim2.new(1, -90, 1, 0)
     Title.Position = UDim2.new(0, 12, 0, 0)
     Title.BackgroundTransparency = 1
-    Title.Text = "olliE // PvP Kit Hub"
+    Title.Text = "olliE // PvP Kit"
     Title.TextColor3 = Color3.fromRGB(255, 80, 80)
-    Title.TextSize = 15
+    Title.TextSize = 16
     Title.Font = Enum.Font.GothamBold
     Title.TextXAlignment = Enum.TextXAlignment.Left
     Title.Parent = TitleBar
 
     local MinBtn = Instance.new("TextButton")
-    MinBtn.Size = UDim2.new(0, 28, 0, 28)
-    MinBtn.Position = UDim2.new(1, -64, 0, 4)
-    MinBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+    MinBtn.Size = UDim2.new(0, 32, 0, 32)
+    MinBtn.Position = UDim2.new(1, -72, 0, 4)
+    MinBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
     MinBtn.Text = "−"
     MinBtn.TextColor3 = Color3.fromRGB(255, 200, 80)
-    MinBtn.TextSize = 18
+    MinBtn.TextSize = 20
     MinBtn.Font = Enum.Font.GothamBold
     MinBtn.Parent = TitleBar
     local MinCorner = Instance.new("UICorner")
     MinCorner.CornerRadius = UDim.new(0, 6)
     MinCorner.Parent = MinBtn
-    MinBtn.MouseButton1Click:Connect(function()
-        ToggleUI()
-    end)
+    MinBtn.MouseButton1Click:Connect(ToggleUI)
 
     local CloseBtn = Instance.new("TextButton")
-    CloseBtn.Size = UDim2.new(0, 28, 0, 28)
-    CloseBtn.Position = UDim2.new(1, -32, 0, 4)
-    CloseBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+    CloseBtn.Size = UDim2.new(0, 32, 0, 32)
+    CloseBtn.Position = UDim2.new(1, -36, 0, 4)
+    CloseBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
     CloseBtn.Text = "×"
     CloseBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
-    CloseBtn.TextSize = 18
+    CloseBtn.TextSize = 20
     CloseBtn.Font = Enum.Font.GothamBold
     CloseBtn.Parent = TitleBar
     local CloseCorner = Instance.new("UICorner")
     CloseCorner.CornerRadius = UDim.new(0, 6)
     CloseCorner.Parent = CloseBtn
-    CloseBtn.MouseButton1Click:Connect(function()
-        ToggleUI()
-    end)
+    CloseBtn.MouseButton1Click:Connect(ToggleUI)
 
     local Content = Instance.new("ScrollingFrame")
-    Content.Size = UDim2.new(1, -16, 1, -48)
-    Content.Position = UDim2.new(0, 8, 0, 42)
+    Content.Size = UDim2.new(1, -12, 1, -50)
+    Content.Position = UDim2.new(0, 6, 0, 46)
     Content.BackgroundTransparency = 1
     Content.BorderSizePixel = 0
-    Content.ScrollBarThickness = 4
+    Content.ScrollBarThickness = 5
     Content.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 90)
-    Content.CanvasSize = UDim2.new(0, 0, 0, 780)
+    Content.CanvasSize = UDim2.new(0, 0, 0, 820)
     Content.Parent = Main
     local layout = Instance.new("UIListLayout")
-    layout.Padding = UDim.new(0, 6)
+    layout.Padding = UDim.new(0, 5)
     layout.Parent = Content
 
     local function Section(name)
@@ -631,7 +681,7 @@ local function CreateGUI()
 
     local function Toggle(name, default, callback)
         local f = Instance.new("Frame")
-        f.Size = UDim2.new(1, 0, 0, 28)
+        f.Size = UDim2.new(1, 0, 0, 30)
         f.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
         f.BorderSizePixel = 0
         f.Parent = Content
@@ -639,7 +689,7 @@ local function CreateGUI()
         c.CornerRadius = UDim.new(0, 6)
         c.Parent = f
         local label = Instance.new("TextLabel")
-        label.Size = UDim2.new(1, -50, 1, 0)
+        label.Size = UDim2.new(1, -55, 1, 0)
         label.Position = UDim2.new(0, 10, 0, 0)
         label.BackgroundTransparency = 1
         label.Text = name
@@ -649,8 +699,8 @@ local function CreateGUI()
         label.TextXAlignment = Enum.TextXAlignment.Left
         label.Parent = f
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 36, 0, 18)
-        btn.Position = UDim2.new(1, -44, 0.5, -9)
+        btn.Size = UDim2.new(0, 40, 0, 20)
+        btn.Position = UDim2.new(1, -48, 0.5, -10)
         btn.BackgroundColor3 = default and Color3.fromRGB(80, 200, 80) or Color3.fromRGB(60, 60, 70)
         btn.Text = ""
         btn.Parent = f
@@ -667,7 +717,7 @@ local function CreateGUI()
 
     local function Slider(name, min, max, default, callback)
         local f = Instance.new("Frame")
-        f.Size = UDim2.new(1, 0, 0, 44)
+        f.Size = UDim2.new(1, 0, 0, 46)
         f.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
         f.BorderSizePixel = 0
         f.Parent = Content
@@ -675,8 +725,8 @@ local function CreateGUI()
         c.CornerRadius = UDim.new(0, 6)
         c.Parent = f
         local label = Instance.new("TextLabel")
-        label.Size = UDim2.new(1, -20, 0, 18)
-        label.Position = UDim2.new(0, 10, 0, 4)
+        label.Size = UDim2.new(1, -16, 0, 18)
+        label.Position = UDim2.new(0, 8, 0, 4)
         label.BackgroundTransparency = 1
         label.Text = name .. ": " .. tostring(default)
         label.TextColor3 = Color3.fromRGB(230, 230, 235)
@@ -685,8 +735,8 @@ local function CreateGUI()
         label.TextXAlignment = Enum.TextXAlignment.Left
         label.Parent = f
         local bar = Instance.new("Frame")
-        bar.Size = UDim2.new(1, -20, 0, 6)
-        bar.Position = UDim2.new(0, 10, 0, 28)
+        bar.Size = UDim2.new(1, -16, 0, 8)
+        bar.Position = UDim2.new(0, 8, 0, 28)
         bar.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
         bar.BorderSizePixel = 0
         bar.Parent = f
@@ -770,26 +820,29 @@ local function CreateGUI()
     local status = Instance.new("TextLabel")
     status.Size = UDim2.new(1, 0, 0, 24)
     status.BackgroundTransparency = 1
-    status.Text = Config.AntiBan.Enabled and "Anti-Ban: ACTIVE" or "Anti-Ban: OFF"
-    status.TextColor3 = Config.AntiBan.Enabled and Color3.fromRGB(80, 220, 80) or Color3.fromRGB(220, 80, 80)
+    status.Text = "Anti-Ban: ACTIVE"
+    status.TextColor3 = Color3.fromRGB(80, 220, 80)
     status.TextSize = 13
     status.Font = Enum.Font.GothamBold
     status.Parent = Content
 
     local hint = Instance.new("TextLabel")
-    hint.Size = UDim2.new(1, 0, 0, 36)
+    hint.Size = UDim2.new(1, 0, 0, 40)
     hint.BackgroundTransparency = 1
-    hint.Text = "RMB hold = aimlock\nRightCtrl / red oE button = toggle UI"
+    hint.Text = "RMB = aimlock\nRed oE button / RightCtrl = toggle UI"
     hint.TextColor3 = Color3.fromRGB(120, 120, 130)
     hint.TextSize = 11
     hint.Font = Enum.Font.Gotham
     hint.TextYAlignment = Enum.TextYAlignment.Top
     hint.Parent = Content
+
+    print("[olliE] GUI created — look for big red oE button")
 end
 
 local function Init()
     InitAntiBan()
     CreateGUI()
+
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr \~= LocalPlayer then SetupPlayerESP(plr) end
     end
@@ -808,6 +861,7 @@ local function Init()
         task.wait(0.8)
         if Config.Misc.Fullbright then ToggleFullbright(true) end
     end)
+
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
         if input.UserInputType == Config.Aimbot.Key then Aiming = true end
@@ -821,6 +875,7 @@ local function Init()
             if not Config.Aimbot.Sticky then CurrentTarget = nil end
         end
     end)
+
     table.insert(Connections, RunService.RenderStepped:Connect(function()
         UpdateESP()
         UpdateAimbot()
@@ -831,7 +886,11 @@ local function Init()
             end
         end
     end))
+
+    print("[olliE] FULL INIT DONE — absolute olliE")
 end
 
-Init()
-print("[olliE] PvP Kit Hub loaded — floating oE button + RightCtrl toggle")
+task.spawn(function()
+    task.wait(0.3)
+    Init()
+end)
