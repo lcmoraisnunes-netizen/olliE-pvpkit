@@ -1,9 +1,7 @@
 --[[
     olliE PvP Kit Hub — 1.8 KIT PVP / Bloxine Extra
     Place \~72393956865647
-    ESP Box + Hitbox ESP, Skeleton, Snaplines, Aimbot FOV + Lock,
-    Hitbox Expander, Anti-Ban, Speed/Jump/Noclip/Fullbright,
-    Full draggable GUI hub
+    Fixed: floating open/close button + RightCtrl keybind
 ]]
 
 local Players = game:GetService("Players")
@@ -73,6 +71,9 @@ local CurrentTarget = nil
 local Aiming = false
 local Connections = {}
 local DrawingObjects = {}
+local UIVisible = true
+local MainFrame = nil
+local ScreenGuiRef = nil
 
 local function IsAlive(plr)
     local char = plr.Character
@@ -470,6 +471,13 @@ local function InitAntiBan()
     end
 end
 
+local function ToggleUI()
+    UIVisible = not UIVisible
+    if MainFrame then
+        MainFrame.Visible = UIVisible
+    end
+end
+
 local function CreateGUI()
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "olliE_PvPKitHub"
@@ -477,6 +485,53 @@ local function CreateGUI()
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     pcall(function() ScreenGui.Parent = CoreGui end)
     if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+    ScreenGuiRef = ScreenGui
+
+    -- Floating open/close button (always visible)
+    local FloatBtn = Instance.new("TextButton")
+    FloatBtn.Name = "FloatToggle"
+    FloatBtn.Size = UDim2.new(0, 48, 0, 48)
+    FloatBtn.Position = UDim2.new(0, 20, 0.5, -24)
+    FloatBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+    FloatBtn.Text = "oE"
+    FloatBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    FloatBtn.TextSize = 16
+    FloatBtn.Font = Enum.Font.GothamBold
+    FloatBtn.BorderSizePixel = 0
+    FloatBtn.ZIndex = 50
+    FloatBtn.Parent = ScreenGui
+    local FloatCorner = Instance.new("UICorner")
+    FloatCorner.CornerRadius = UDim.new(1, 0)
+    FloatCorner.Parent = FloatBtn
+    local FloatStroke = Instance.new("UIStroke")
+    FloatStroke.Color = Color3.fromRGB(255, 255, 255)
+    FloatStroke.Thickness = 1.5
+    FloatStroke.Parent = FloatBtn
+
+    -- make floating button draggable
+    local draggingFloat, dragStart, startPos
+    FloatBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingFloat = true
+            dragStart = input.Position
+            startPos = FloatBtn.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if draggingFloat and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            FloatBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingFloat = false
+        end
+    end)
+
+    FloatBtn.MouseButton1Click:Connect(function()
+        ToggleUI()
+    end)
 
     local Main = Instance.new("Frame")
     Main.Name = "Main"
@@ -486,7 +541,9 @@ local function CreateGUI()
     Main.BorderSizePixel = 0
     Main.Active = true
     Main.Draggable = true
+    Main.Visible = true
     Main.Parent = ScreenGui
+    MainFrame = Main
     local UICorner = Instance.new("UICorner")
     UICorner.CornerRadius = UDim.new(0, 8)
     UICorner.Parent = Main
@@ -501,7 +558,7 @@ local function CreateGUI()
     TitleCorner.Parent = TitleBar
 
     local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(1, -40, 1, 0)
+    Title.Size = UDim2.new(1, -80, 1, 0)
     Title.Position = UDim2.new(0, 12, 0, 0)
     Title.BackgroundTransparency = 1
     Title.Text = "olliE // PvP Kit Hub"
@@ -510,6 +567,22 @@ local function CreateGUI()
     Title.Font = Enum.Font.GothamBold
     Title.TextXAlignment = Enum.TextXAlignment.Left
     Title.Parent = TitleBar
+
+    local MinBtn = Instance.new("TextButton")
+    MinBtn.Size = UDim2.new(0, 28, 0, 28)
+    MinBtn.Position = UDim2.new(1, -64, 0, 4)
+    MinBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+    MinBtn.Text = "−"
+    MinBtn.TextColor3 = Color3.fromRGB(255, 200, 80)
+    MinBtn.TextSize = 18
+    MinBtn.Font = Enum.Font.GothamBold
+    MinBtn.Parent = TitleBar
+    local MinCorner = Instance.new("UICorner")
+    MinCorner.CornerRadius = UDim.new(0, 6)
+    MinCorner.Parent = MinBtn
+    MinBtn.MouseButton1Click:Connect(function()
+        ToggleUI()
+    end)
 
     local CloseBtn = Instance.new("TextButton")
     CloseBtn.Size = UDim2.new(0, 28, 0, 28)
@@ -523,6 +596,9 @@ local function CreateGUI()
     local CloseCorner = Instance.new("UICorner")
     CloseCorner.CornerRadius = UDim.new(0, 6)
     CloseCorner.Parent = CloseBtn
+    CloseBtn.MouseButton1Click:Connect(function()
+        ToggleUI()
+    end)
 
     local Content = Instance.new("ScrollingFrame")
     Content.Size = UDim2.new(1, -16, 1, -48)
@@ -627,13 +703,17 @@ local function CreateGUI()
         fc.Parent = fill
         local dragging = false
         bar.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+            end
         end)
         UserInputService.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = false
+            end
         end)
         UserInputService.InputChanged:Connect(function(input)
-            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
                 local rel = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
                 local val = math.floor(min + (max - min) * rel)
                 fill.Size = UDim2.new(rel, 0, 1, 0)
@@ -696,15 +776,14 @@ local function CreateGUI()
     status.Font = Enum.Font.GothamBold
     status.Parent = Content
 
-    CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
-
     local hint = Instance.new("TextLabel")
-    hint.Size = UDim2.new(1, 0, 0, 20)
+    hint.Size = UDim2.new(1, 0, 0, 36)
     hint.BackgroundTransparency = 1
-    hint.Text = "RMB hold = aimlock  |  drag title to move"
+    hint.Text = "RMB hold = aimlock\nRightCtrl / red oE button = toggle UI"
     hint.TextColor3 = Color3.fromRGB(120, 120, 130)
     hint.TextSize = 11
     hint.Font = Enum.Font.Gotham
+    hint.TextYAlignment = Enum.TextYAlignment.Top
     hint.Parent = Content
 end
 
@@ -732,6 +811,9 @@ local function Init()
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
         if input.UserInputType == Config.Aimbot.Key then Aiming = true end
+        if input.KeyCode == Enum.KeyCode.RightControl then
+            ToggleUI()
+        end
     end)
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Config.Aimbot.Key then
@@ -752,4 +834,4 @@ local function Init()
 end
 
 Init()
-print("[olliE] PvP Kit Hub loaded — absolute olliE")
+print("[olliE] PvP Kit Hub loaded — floating oE button + RightCtrl toggle")
